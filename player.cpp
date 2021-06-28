@@ -2,15 +2,16 @@
 #include <fstream>
 #include <array>
 #include <set>
+#include <string>
 #include <vector>
 #include <queue>
 #include <cstdlib>
 #include <ctime>
-
 using namespace std;
 const int SIZE = 8;
-const int INF_VALUE = 1000000;
-
+const int INF_VALUE = 0x7FFFFFFF;
+// 1 (O) 2 (O) 3 (O) 4 (O) 5 (O)
+// 5 (O) 4 (O) 3 (O) 2 (O) 1 (O)
 struct Point {
     int x, y;
 	Point() : Point(0, 0) {}
@@ -29,7 +30,6 @@ struct Point {
 	}
 };
 
-// 每回合
 class OthelloBoard {
 private:
     enum SPOT_STATE {
@@ -138,10 +138,7 @@ public:
                 board[i][j] = round.board[i][j];
             }
         }
-        for(int i = 0; i < round.next_valid_spots.size(); i++){
-            Point p = round.next_valid_spots[i];
-            next_valid_spots.push_back(p);
-        }
+        next_valid_spots = round.next_valid_spots;
         cur_player = round.cur_player;
         disc_count[EMPTY] = round.disc_count[EMPTY];
         disc_count[BLACK] = round.disc_count[BLACK];
@@ -183,42 +180,112 @@ public:
     vector<Point> get_cur_next_valid_spots(){
         return next_valid_spots;
     }
+    //
+    array<array<int, SIZE>, SIZE> get_cur_board(){
+        return board;
+    }
+    //
+    int get_cur_player(){
+        return cur_player;
+    }
+    //
+    int get_gap(){
+        return disc_count[cur_player] - disc_count[get_next_player(cur_player)];
+    }
+    int get_dics_num(){
+        return disc_count[cur_player] + disc_count[get_next_player(cur_player)];
+    }
+    bool get_done(){
+        return done;
+    }
 };
 
 class AI {
 private:
     // state value
     int state_value[8][8] = {
-        100,-50, 5, 3, 3, 5,-50, 100,
-        -50,-100, 5, 1, 1, 5,-100, -50,
-         5, 5, 5, 1, 1, 5, 5,  5,
-         3, 0, 1, 3, 3, 1, 0,  3,
-         3, 0, 1, 3, 3, 1, 0,  3,
-         5, 5, 5, 1, 1, 5, 5,  5,
-        -50,-100, 5, 1, 1, 5,-100, -50,
-        100,-50, 5, 3, 3, 5,-50, 100,
+        500, -25, 10, 5, 5, 10, -25, 500,
+        -25, -50, -5, 1, 1, -5, -50, -25,
+        10, -5, 2, 2, 2, 2, -5, 10,
+        5, 1, 2, -3, -3, 2, 1, 5,
+        5, 1, 2, -3, -3, 2, 1, 5,
+        10, -5, 2, 2, 2, 2, -5, 10,
+        -25, -50, -5, 1, 1, -5, -50, -25,
+        500 , -25, 10, 5, 5, 10, -25, 500,
     };
-    int limit_depth = 4;
+    int limit_depth = 5;
     // informations
-    OthelloBoard cur_round;
+    OthelloBoard & first_round;
+    array<array<int, SIZE>, SIZE> board;
+    vector<Point> next_valid_spots;
+    int cur_player;
 public:
-    AI(OthelloBoard & cur_round):cur_round(cur_round) {}
+    AI(OthelloBoard & first_round):first_round(first_round) {
+        board = first_round.get_cur_board();
+        next_valid_spots = first_round.get_cur_next_valid_spots();
+        cur_player = first_round.get_cur_player();
+    }
     // state value
-    int evaluation(Point point){
-        int spot_value = 0;
-        spot_value += state_value[point.x][point.y];
-        return spot_value;
+    int evaluation(OthelloBoard & round, Point p){
+        OthelloBoard game  = round;
+        int value = 0;
+        game.put_disc(p);
+
+        // 落下這個點後盤面分數
+        int state = 0;
+        for(int i = 0; i < SIZE; i++){
+            for(int j = 0; j < SIZE; j++){
+                if(game.get_cur_board()[i][j] == round.get_cur_player())
+                    state += state_value[i][j];
+                else if(game.get_cur_board()[i][j] == 3 - round.get_cur_player())
+                    state -= state_value[i][j];
+            }
+        }
+        // 對方行動力
+        int mob = 0;
+        mob = -game.get_cur_next_valid_spots().size();
+        // 下這個點後對方與自己的棋子數目差
+        int gap = 0;
+        gap = -game.get_gap();
+
+        value = state + mob * 10 + gap;
+        return value;
+    }
+    // close end game
+    int end_game_value(OthelloBoard & round){
+        OthelloBoard game  = round;
+        int value = 0;
+
+        // 盤面分數
+        int state = 0;
+        for(int i = 0; i < SIZE; i++){
+            for(int j = 0; j < SIZE; j++){
+                if(game.get_cur_board()[i][j] == round.get_cur_player())
+                    state += state_value[i][j];
+                else if(game.get_cur_board()[i][j] == 3 - round.get_cur_player())
+                    state -= state_value[i][j];
+            }
+        }
+        // 自己與對方的棋子數目差
+        int gap = 0;
+        gap = game.get_gap();
+
+        value = state + gap;
+        return value;
     }
     // minimax recursion ()
     // this round(), choice point, depth, opponenet or me, alpha, beta
     int minimax(OthelloBoard & round, Point choice_point, int depth, bool player_type, int alpha, int beta){
         if(depth == limit_depth){
-            return evaluation(choice_point);
+            return evaluation(round, choice_point);
         }
         OthelloBoard next_round(round);
         next_round.put_disc(choice_point);
         if(player_type){
             int best_value = -INF_VALUE;
+            if(next_round.get_cur_next_valid_spots().size() == 0){
+                return end_game_value(next_round);
+            }
             for(auto p:next_round.get_cur_next_valid_spots()){
                 best_value = max(best_value, minimax(next_round, p, depth + 1, false, alpha, beta));
                 alpha = max(alpha, best_value);
@@ -228,7 +295,7 @@ public:
         } else {
             int best_value = INF_VALUE;
             for(auto p:next_round.get_cur_next_valid_spots()){
-                best_value = max(best_value, minimax(next_round, p, depth + 1, true, alpha, beta));
+                best_value = min(best_value, minimax(next_round, p, depth + 1, true, alpha, beta));
                 beta = min(beta, best_value);
                 if(beta <= alpha) break;
             }
@@ -238,17 +305,16 @@ public:
     // return the best choice this round
     Point best_choice(){
         int max_value = -INF_VALUE;
-        vector<int> value;
-        int max_idx = 0;
-        for(auto p : cur_round.get_cur_next_valid_spots()){
-            int val = minimax(cur_round, p, 1, false, -INF_VALUE, INF_VALUE);
-            value.push_back(val);
+        int n_valid_spots_value[50] = {0};
+        int choice_idx = -1;
+        for(long unsigned int i = 0; i < next_valid_spots.size(); i++){
+            n_valid_spots_value[i] = minimax(first_round, next_valid_spots[i], 1, false, -INF_VALUE, INF_VALUE);
+            if(max_value < n_valid_spots_value[i]){
+                max_value = n_valid_spots_value[i];
+                choice_idx = i;
+            }
         }
-        for(int i = 0; i < value.size(); i++){
-            if(value[max_idx] < value[i]) max_idx = i;
-        }
-        Point p = cur_round.get_cur_next_valid_spots()[max_idx];
-        return p;
+        return next_valid_spots[choice_idx];
     }
 };
 
@@ -277,7 +343,7 @@ public:
     }
 
     void write_valid_spot(std::ofstream& fout) {
-        int n_valid_spots = next_valid_spots.size();
+        long unsigned int n_valid_spots = next_valid_spots.size();
         OthelloBoard first_round(board, next_valid_spots, player);
         AI ai(first_round);
         Point p = ai.best_choice();
